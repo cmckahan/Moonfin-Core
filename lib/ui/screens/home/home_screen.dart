@@ -22,10 +22,8 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/models/home_row.dart';
-import '../../../data/repositories/mdblist_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/background_service.dart';
-import '../../widgets/rating_display.dart';
 import '../../../data/services/theme_music_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/plugin_sync_service.dart';
@@ -40,7 +38,6 @@ import '../../widgets/exit_confirmation_dialog.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../../widgets/quick_return_wrapper.dart';
 import '../../../util/app_exit.dart';
-import '../../../util/overview_text.dart';
 import '../../../util/global_shortcut_focus.dart';
 import '../../widgets/focus/context_menu_sheet.dart';
 import '../../widgets/focus/locked_focus_row.dart';
@@ -850,11 +847,6 @@ class _ContentRowsState extends State<_ContentRows>
   String? _mobilePressedV2Key;
   String? _mouseHoveredV2Key;
   final Set<String> _v2FocusPrefetchedUrls = <String>{};
-  final ValueNotifier<Map<String, Map<String, double>>>
-  _v2AdditionalRatingsNotifier = ValueNotifier({});
-  Map<String, Map<String, double>> get _v2AdditionalRatingsByKey =>
-      _v2AdditionalRatingsNotifier.value;
-  final Map<String, Future<void>> _v2RatingsRequests = {};
   late bool _lastMedia3PreviewPreference;
   List<double> _rowTopOffsets = [];
   List<double> _rowExtents = [];
@@ -1279,7 +1271,6 @@ class _ContentRowsState extends State<_ContentRows>
     _scrollController.dispose();
     _scrollOffsetNotifier.dispose();
     _activeFocusedRowNotifier.dispose();
-    _v2AdditionalRatingsNotifier.dispose();
     _mediaBarVisibleNotifier.dispose();
     _chromeFocusActiveNotifier.dispose();
     _chromeAudioActiveNotifier.dispose();
@@ -2039,49 +2030,6 @@ class _ContentRowsState extends State<_ContentRows>
       v2FocusedWidth: v2FocusedWidth,
       useSeriesThumbs: useSeriesThumbs,
     );
-  }
-
-  void _primeV2FocusedRatings(AggregatedItem item) {
-    if (!widget.prefs.get(UserPreferences.enableAdditionalRatings)) {
-      return;
-    }
-
-    final itemKey = _previewKeyFor(item);
-    if (_v2AdditionalRatingsByKey.containsKey(itemKey)) {
-      return;
-    }
-    if (_v2RatingsRequests.containsKey(itemKey)) {
-      return;
-    }
-
-    final request = _loadV2FocusedRatings(item, itemKey).whenComplete(() {
-      _v2RatingsRequests.remove(itemKey);
-    });
-    _v2RatingsRequests[itemKey] = request;
-  }
-
-  Future<void> _loadV2FocusedRatings(
-    AggregatedItem item,
-    String itemKey,
-  ) async {
-    final clientFactory = GetIt.instance<MediaServerClientFactory>();
-    final resolveClient =
-        clientFactory.getClientIfExists(item.serverId) ??
-        clientFactory.getActiveClient();
-
-    final result = await GetIt.instance<MdbListRepository>().getRatingsForItem(
-      item,
-      resolveClient: resolveClient,
-      episodeRatingsEnabled: widget.prefs.canFetchEpisodeRatings,
-    );
-    if (!mounted || result == null || result.isEmpty) {
-      return;
-    }
-
-    _v2AdditionalRatingsNotifier.value = {
-      ..._v2AdditionalRatingsByKey,
-      itemKey: result,
-    };
   }
 
   double _mediaBarHeight() {
@@ -3742,17 +3690,11 @@ class _ContentRowsState extends State<_ContentRows>
     return prefs.get(UserPreferences.classicHomeRowsPadding).toDouble();
   }
 
-  double _v2MetadataHeightBudget(UserPreferences prefs) {
-    if (PlatformDetection.useMobileUi) {
-      return 50.0;
-    }
-    final hasAdditionalRatings = prefs.get(
-      UserPreferences.enableAdditionalRatings,
-    );
-    final hasAdditionalRatingsPadding = hasAdditionalRatings ? 8.0 : 0.0;
-    final heightBudget = 175.0 + hasAdditionalRatingsPadding;
-    return heightBudget;
-  }
+  // Modern (v2) rows only show the poster/banner image plus the title and
+  // subtitle metadata line MediaCard renders below it — no ratings row or
+  // overview text — so the row only needs as much room as Classic rows
+  // budget for that same title+subtitle text.
+  double _v2MetadataHeightBudget(UserPreferences prefs) => 46.0;
 
   double _overlayRowShift({
     required double rowViewportTop,
@@ -4642,7 +4584,6 @@ class _ContentRowsState extends State<_ContentRows>
           _forceRevealOnNextRowFocusFromMediaBar = false;
           widget.onItemSelected(item);
           if (isRowsV2 && !row.isAudio) {
-            _primeV2FocusedRatings(item);
             _prefetchV2FocusNeighbors(
               row: row,
               focusedIndex: index,
@@ -4923,9 +4864,6 @@ class _ContentRowsState extends State<_ContentRows>
                         if (_mouseHoveredV2Key != previewKey) {
                           setState(() => _mouseHoveredV2Key = previewKey);
                         }
-                        if (!row.isAudio) {
-                          _primeV2FocusedRatings(item);
-                        }
                       }
                       if (!PlatformDetection.useMobileUi && canPreview) {
                         _schedulePreview(
@@ -4964,7 +4902,6 @@ class _ContentRowsState extends State<_ContentRows>
                             _mouseHoveredV2Key = null;
                           });
                           widget.onItemSelected(item);
-                          _primeV2FocusedRatings(item);
                         }
                         return;
                       }
@@ -4999,41 +4936,9 @@ class _ContentRowsState extends State<_ContentRows>
                           focusColor: focusColor,
                         );
 
-                  if (isRowsV2) {
-                    final showExtendedSection = effectiveV2Focused;
-                    final extendedSection = showExtendedSection
-                        ? _buildV2ExtendedSection(
-                            ctx,
-                            item,
-                            // Ratings are cached under the global item key, so
-                            // look them up without the row index.
-                            _previewKeyFor(item),
-                            cardWidth: width,
-                            extendedWidth: v2ExtendedWidth,
-                            isAudioRow: row.isAudio,
-                                                // Hide ratings/overview when the focused image is a banner
-                                                hideMetaWhenBanner: ar == kBannerAspectRatio,
-                                              )
-                                            : null;
-                    return AnimatedSize(
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeInOutCubic,
-                      alignment: Alignment.topLeft,
-                      clipBehavior: Clip.none,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          previewWrappedCard,
-                          if (extendedSection != null) ...[
-                            const SizedBox(height: 4),
-                            extendedSection,
-                          ],
-                        ],
-                      ),
-                    );
-                  }
-
+                  // Modern (v2) rows show only the poster/banner plus the
+                  // title and subtitle metadata line that MediaCard already
+                  // renders beneath the image — no ratings or overview text.
                   return previewWrappedCard;
                 },
               );
@@ -5041,90 +4946,6 @@ class _ContentRowsState extends State<_ContentRows>
           );
         },
       ),
-    );
-  }
-
-  Widget _buildV2ExtendedSection(
-    BuildContext context,
-    AggregatedItem item,
-    String itemKey, {
-    required double cardWidth,
-    required double extendedWidth,
-    required bool isAudioRow,
-      bool hideMetaWhenBanner = false,
-    }) {
-    return ValueListenableBuilder<Map<String, Map<String, double>>>(
-      valueListenable: _v2AdditionalRatingsNotifier,
-      builder: (context, ratingsByKey, _) {
-        final additionalRatings = ratingsByKey[itemKey] ?? {};
-        final hasAnyRating =
-            item.communityRating != null ||
-            item.criticRating != null ||
-            additionalRatings.isNotEmpty;
-        final overview = isAudioRow ? '' : (item.overview ?? '');
-        if (!hasAnyRating && overview.isEmpty) {
-          return SizedBox(width: cardWidth);
-        }
-
-        final isNeon = ThemeRegistry.active.id == ThemeRegistry.neonPulseId;
-        final baseStyle =
-            Theme.of(context).textTheme.bodySmall ??
-            const TextStyle(fontSize: 12);
-        final overviewStyle = baseStyle.copyWith(
-          color: isNeon
-              ? AppColorScheme.onSurface
-              : Theme.of(context).colorScheme.onSurface.withAlpha(180),
-          shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
-          height: 1.4,
-        );
-
-        return SizedBox(
-          width: cardWidth,
-          child: Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.topLeft,
-            children: [
-              SizedBox(
-                width: extendedWidth,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                                if (!hideMetaWhenBanner && hasAnyRating)
-                      RatingsRow(
-                        ratings: additionalRatings,
-                        communityRating: item.communityRating,
-                        criticRating: item.criticRating,
-                        enableAdditionalRatings: widget.prefs.get(
-                          UserPreferences.enableAdditionalRatings,
-                        ),
-                        enabledRatings: widget.prefs.get(
-                          UserPreferences.enabledRatings,
-                        ),
-                        showLabels: widget.prefs.get(
-                          UserPreferences.showRatingLabels,
-                        ),
-                        showBadges: widget.prefs.get(
-                          UserPreferences.showRatingBadges,
-                        ),
-                      ),
-                                if (!hideMetaWhenBanner && overview.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          cleanOverview(overview),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: overviewStyle,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
