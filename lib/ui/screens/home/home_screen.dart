@@ -2514,6 +2514,12 @@ class _ContentRowsState extends State<_ContentRows>
         headerPaddingTop + headerPaddingBottom + titleHeight + subtitleHeight;
 
     var totalHeight = childHeight + headerHeight;
+    // The minimum height a row can ever be: just enough to fit the
+    // image plus title/subtitle text with zero extra breathing room.
+    // The padding slider below is allowed to shrink rows down to this
+    // floor, but not past it — going past it was cutting into the
+    // actual image/text and causing rows to visually overlap.
+    final minRequiredHeight = totalHeight;
     if (!fullScreenRows) {
       if (isRowsV2) {
         final customHeight = prefs
@@ -2527,6 +2533,7 @@ class _ContentRowsState extends State<_ContentRows>
           totalHeight += 100.0;
         }
         totalHeight += offset;
+        totalHeight = totalHeight.clamp(minRequiredHeight, double.infinity);
       } else if (_isLibraryRow(row)) {
         final classicPadding = prefs
             .get(UserPreferences.classicHomeRowsPadding)
@@ -3813,11 +3820,6 @@ class _ContentRowsState extends State<_ContentRows>
   }
 
   String? _rowSubtitle(HomeRow row, AppLocalizations l10n) {
-    if (row.id == 'merged_calendar' ||
-        row.id == 'radarr_calendar' ||
-        row.id == 'sonarr_calendar') {
-      return 'Radarr and Sonarr Calendars';
-    }
     if (row.id.startsWith('seerr_')) return l10n.seerrDiscoveryRows;
     if (row.id.startsWith('tmdb_')) return 'TMDB Lists';
     if (row.id.startsWith('imdb_')) return 'IMDb List';
@@ -4751,52 +4753,12 @@ class _ContentRowsState extends State<_ContentRows>
                       _ => null,
                     };
                     cardTitle = item.seriesName ?? item.name;
-                    if (effectiveV2Focused) {
-                      cardSubtitle = null;
-                      final row2Text = episodeInfo != null
-                          ? '$episodeInfo - ${item.name}'
-                          : item.name;
-                      final row3Text = _v2MetadataLine(item);
-                      final isNeon =
-                          ThemeRegistry.active.id == ThemeRegistry.neonPulseId;
-                      final baseTextStyle =
-                          Theme.of(context).textTheme.bodySmall ??
-                          const TextStyle(fontSize: 12);
-                      final subtitleColor = isNeon
-                          ? AppColorScheme.onSurface
-                          : Theme.of(
-                              context,
-                            ).colorScheme.onSurface.withAlpha(180);
-                      final subtitleStyle = baseTextStyle.copyWith(
-                        color: subtitleColor,
-                        shadows: const [
-                          Shadow(blurRadius: 4, color: Colors.black54),
-                        ],
-                      );
-
-                      cardSubtitleWidget = Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            row2Text,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: subtitleStyle,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            row3Text,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: subtitleStyle,
-                          ),
-                        ],
-                      );
-                    } else {
-                      cardSubtitle = episodeInfo ?? item.name;
-                      cardSubtitleWidget = null;
-                    }
+                    // Always a single line, focused or not — switching to a
+                    // taller two-line subtitle on focus made the card grow
+                    // and pushed the row down by a few pixels each time a
+                    // title was selected.
+                    cardSubtitle = episodeInfo ?? item.name;
+                    cardSubtitleWidget = null;
                   } else {
                     cardTitle = item.name;
                     final showUserRatings =
