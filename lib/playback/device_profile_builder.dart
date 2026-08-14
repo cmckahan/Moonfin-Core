@@ -145,12 +145,13 @@ class DeviceProfileBuilder {
     // picture with working audio. Servers without fMP4 HLS fall through to
     // the TS profile and encode H264, which renders.
     bool hevcRequiresFmp4Hls = false,
-    // Keeps DTS out of both HLS transcode offers. AVFoundation has no DTS
-    // decoder, and the server copies a source track straight through whenever
-    // its codec is on the offer, so leaving DTS there hands back a stream whose
-    // audio nothing on the device can open. Backends that decode the HLS output
-    // themselves must leave this false.
-    bool hlsAudioExcludesDts = false,
+    // Keeps DTS and MP2 out of both HLS transcode offers, since AVFoundation
+    // decodes neither. The server copies a source track straight through
+    // whenever its codec is on the offer, so leaving them there hands back a
+    // stream the device cannot open at all. MP2 is what DVB live TV carries,
+    // which took every such channel down on Apple. Backends that decode the
+    // HLS output themselves must leave this false.
+    bool hlsAudioForAvFoundation = false,
     int hevcMainLevel = 0,
     bool supportsHevcDolbyVision = false,
     bool supportsHevcDolbyVisionEl = false,
@@ -298,11 +299,23 @@ class DeviceProfileBuilder {
             forceStereo: forceStereo,
           );
 
+    final passthroughAudioCodecs = effectiveAllowedAudioCodecs
+        .where(
+          (codec) => _isAudioCodecPassthroughEnabled(
+            codec: codec,
+            ac3PassthroughEnabled: ac3PassthroughEnabled,
+            eac3PassthroughEnabled: eac3PassthroughEnabled,
+            dtsCorePassthroughEnabled: dtsCorePassthroughEnabled,
+            trueHdPassthroughEnabled: trueHdPassthroughEnabled,
+          ),
+        )
+        .toSet();
+
     final mpegTsAudioCodecs = _hlsAudioCodecsForFallback(
       effectiveAudioFallbackCodec: effectiveAudioFallbackCodec,
       allowedAudioCodecs: effectiveAllowedAudioCodecs,
       containerAudioCodecs: _hlsMpegTsAudioCodecs,
-      excludeDts: hlsAudioExcludesDts,
+      forAvFoundation: hlsAudioForAvFoundation,
     );
 
     // Offer HEVC as a transcode target only when the server's encoding options
@@ -375,7 +388,7 @@ class DeviceProfileBuilder {
           effectiveAudioFallbackCodec: effectiveAudioFallbackCodec,
           allowedAudioCodecs: effectiveAllowedAudioCodecs,
           containerAudioCodecs: _hlsFmp4AudioCodecs,
-          excludeDts: hlsAudioExcludesDts,
+          forAvFoundation: hlsAudioForAvFoundation,
         ).join(','),
         'CopyTimestamps': false,
         'EnableSubtitlesInManifest': true,
@@ -406,6 +419,7 @@ class DeviceProfileBuilder {
 
     final codecProfiles = _codecProfiles(
       maxAudioChannels: advertisedMaxChannels,
+      passthroughAudioCodecs: passthroughAudioCodecs,
       forceStereo: limitStereoDirectPlay,
       maxResolution: maxResolution,
       supportsAvc: effectiveSupportsAvc,
@@ -877,14 +891,18 @@ class DeviceProfileBuilder {
         AudioFallbackCodec.flac => const <String>['flac', 'opus', 'aac', 'mp3'],
       };
 
+  static const Set<String> _avFoundationUndecodableAudio = {'dts', 'mp2'};
+
   static List<String> _hlsAudioCodecsForFallback({
     required AudioFallbackCodec effectiveAudioFallbackCodec,
     required List<String> allowedAudioCodecs,
     required List<String> containerAudioCodecs,
-    required bool excludeDts,
+    required bool forAvFoundation,
   }) {
-    final carried = excludeDts
-        ? containerAudioCodecs.where((codec) => codec != 'dts')
+    final carried = forAvFoundation
+        ? containerAudioCodecs.where(
+            (codec) => !_avFoundationUndecodableAudio.contains(codec),
+          )
         : containerAudioCodecs;
     final ordered = <String>[
       ..._fallbackTargetOrder(effectiveAudioFallbackCodec),
@@ -985,6 +1003,7 @@ class DeviceProfileBuilder {
 
   static List<Map<String, dynamic>> _codecProfiles({
     required int maxAudioChannels,
+    required Set<String> passthroughAudioCodecs,
     required bool forceStereo,
     required MaxVideoResolution maxResolution,
     required bool supportsAvc,
@@ -1417,9 +1436,21 @@ class DeviceProfileBuilder {
       }
     }
 
+    // The channel cap describes how many PCM channels this device can render,
+    // so it only speaks for audio the device decodes. A passthrough bitstream
+    // leaves the device untouched for the receiver to decode, and object based
+    // formats carry their own layout that plays on receivers with fewer
+    // speakers than the track declares.
+    final channelCappedAudioCodecs = passthroughAudioCodecs.isEmpty
+        ? null
+        : _supportedAudioCodecs
+              .where((codec) => !passthroughAudioCodecs.contains(codec))
+              .join(',');
+
     profiles.add(
       _codecProfile(
         type: 'VideoAudio',
+        codec: channelCappedAudioCodecs,
         conditions: <Map<String, dynamic>>[
           _condition(
             condition: 'LessThanEqual',
