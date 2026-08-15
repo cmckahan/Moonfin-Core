@@ -27,6 +27,16 @@ class MediaCard extends StatefulWidget {
   final String? imageUrl;
   final double width;
   final double aspectRatio;
+
+  /// When set, the image is sized to this exact height instead of letting
+  /// [AspectRatio] derive it from [width]. Callers that switch between
+  /// aspect ratios on focus (e.g. portrait poster <-> 16:9 backdrop) should
+  /// pass the same height for both states — deriving height from width via
+  /// floating-point division can round to a fractionally different value
+  /// between the two aspect ratios, and platforms that scale the whole UI
+  /// (like the Apple TV build's ~1.45x FittedBox scale-up) can amplify that
+  /// sub-pixel rounding difference into a visible shift when focus changes.
+  final double? imageHeight;
   final VoidCallback? onTap;
   final VoidCallback? onPressStart;
   final VoidCallback? onPressEnd;
@@ -76,6 +86,7 @@ class MediaCard extends StatefulWidget {
     this.imageUrl,
     this.width = 150,
     this.aspectRatio = 2 / 3,
+    this.imageHeight,
     this.onTap,
     this.onPressStart,
     this.onPressEnd,
@@ -327,6 +338,7 @@ class _MediaCardState extends State<MediaCard> with FocusStateMixin {
                       imageUrl: widget.imageUrl,
                       title: widget.title,
                       aspectRatio: widget.aspectRatio,
+                      height: widget.imageHeight,
                       isFavorite: widget.isFavorite,
                       isPlayed: widget.isPlayed,
                       unplayedCount: widget.unplayedCount,
@@ -577,6 +589,7 @@ class _CardImage extends StatelessWidget {
   final String? imageUrl;
   final String? title;
   final double aspectRatio;
+  final double? height;
   final bool isFavorite;
   final bool isPlayed;
   final int? unplayedCount;
@@ -599,6 +612,7 @@ class _CardImage extends StatelessWidget {
     this.imageUrl,
     this.title,
     required this.aspectRatio,
+    this.height,
     required this.isFavorite,
     required this.isPlayed,
     this.unplayedCount,
@@ -630,12 +644,10 @@ class _CardImage extends StatelessWidget {
     final showGlow =
         showBorder && !suppressFocusGlow && borders.focusGlow.isNotEmpty;
 
-    return AspectRatio(
-      aspectRatio: aspectRatio,
-      child: Stack(
-        fit: StackFit.expand,
-        clipBehavior: Clip.none,
-        children: [
+    final content = Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [
           if (showGlow)
             Positioned(
               top: -3.5,
@@ -792,8 +804,11 @@ class _CardImage extends StatelessWidget {
               ),
             ),
         ],
-      ),
-    );
+      );
+    if (height != null) {
+      return SizedBox(height: height, width: double.infinity, child: content);
+    }
+    return AspectRatio(aspectRatio: aspectRatio, child: content);
   }
 
   bool get _showWatchedIndicator {

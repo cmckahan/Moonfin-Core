@@ -4788,6 +4788,16 @@ class _ContentRowsState extends State<_ContentRows>
                     imageUrl: imageUrl,
                     width: width,
                     aspectRatio: ar,
+                    // Modern rows switch aspect ratio (and therefore width)
+                    // on focus. Pin height to the same invariant value in
+                    // both states instead of letting AspectRatio re-derive
+                    // it from width each time — the two are algebraically
+                    // equal but floating-point division isn't guaranteed to
+                    // round identically, and platforms that scale the whole
+                    // UI (e.g. tvOS's ~1.45x FittedBox scale-up) can turn
+                    // that sub-pixel rounding difference into a visible
+                    // shift when focus changes.
+                    imageHeight: isRowsV2 ? v2ImageHeight : null,
                     // Safe to compare doubles here, since ar is assigned
                     // this same constant and audio and Seerr filter rows
                     // already get a different ratio.
