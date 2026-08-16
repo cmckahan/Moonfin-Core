@@ -1712,6 +1712,74 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
     );
   }
 
+  void _setRowStyleOverride(int sectionIndex, HomeRowsStyle? style) {
+    setState(() {
+      _sections[sectionIndex] = _sections[sectionIndex].copyWith(
+        styleOverride: style,
+        clearStyleOverride: style == null,
+      );
+    });
+    _save();
+  }
+
+  Future<void> _showRowStyleDialog(
+    int sectionIndex,
+    AppLocalizations l10n,
+  ) async {
+    final section = _sections[sectionIndex];
+    var selected = section.styleOverride;
+    final appDefaultLabel = _rowsStyleLabel(
+      _prefs.get(UserPreferences.homeRowsStyle),
+    );
+    await showFocusRestoringDialog<void>(
+      context: context,
+      builder: (ctx) => withCleanSettingsTypography(
+        ctx,
+        StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: Text(_labelFor(section, l10n)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<HomeRowsStyle?>(
+                  title: Text('Use app default ($appDefaultLabel)'),
+                  value: null,
+                  groupValue: selected,
+                  onChanged: (v) => setDialogState(() => selected = v),
+                ),
+                RadioListTile<HomeRowsStyle?>(
+                  title: Text(_rowsStyleLabel(HomeRowsStyle.v1)),
+                  value: HomeRowsStyle.v1,
+                  groupValue: selected,
+                  onChanged: (v) => setDialogState(() => selected = v),
+                ),
+                RadioListTile<HomeRowsStyle?>(
+                  title: Text(_rowsStyleLabel(HomeRowsStyle.v2)),
+                  value: HomeRowsStyle.v2,
+                  groupValue: selected,
+                  onChanged: (v) => setDialogState(() => selected = v),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: Text(l10n.cancel),
+              ),
+              TextButton(
+                onPressed: () {
+                  _setRowStyleOverride(sectionIndex, selected);
+                  Navigator.of(ctx).pop();
+                },
+                child: Text(l10n.save),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLoadingOverlay(BuildContext context) {
     final theme = Theme.of(context);
     return Positioned.fill(
@@ -2289,6 +2357,24 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (section.type != HomeSectionType.mediaBar)
+                          IconButton(
+                            icon: Icon(
+                              section.styleOverride != null
+                                  ? Icons.view_carousel
+                                  : Icons.view_carousel_outlined,
+                              color: AppColorScheme.onSurface.withValues(
+                                alpha: section.styleOverride != null
+                                    ? 1.0
+                                    : 0.7,
+                              ),
+                            ),
+                            tooltip: section.styleOverride != null
+                                ? '${_labelFor(section, l10n)}: ${_rowsStyleLabel(section.styleOverride!)}'
+                                : 'Row style',
+                            onPressed: () =>
+                                _showRowStyleDialog(sectionIndex, l10n),
+                          ),
                         ReorderableDragStartListener(
                           index: index,
                           child: Icon(

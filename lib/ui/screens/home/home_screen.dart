@@ -2438,9 +2438,7 @@ class _ContentRowsState extends State<_ContentRows>
 
     final desktopScale = _desktopUiScaleFactor();
     final metadataScale = desktopScale;
-    final isRowsV2 =
-        prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2 &&
-        !_isSeerrFilterRow(row);
+    final isRowsV2 = _effectiveRowIsV2(row, prefs);
     final fullScreenRows = _fullScreenRowsEnabled(prefs);
     final platformScale = PlatformDetection.isTV
         ? 0.8 * desktopScale
@@ -2551,9 +2549,7 @@ class _ContentRowsState extends State<_ContentRows>
         ? widget.viewModel.rows[rowIndex]
         : null;
     if (row == null) return defaultTop;
-    final isRowsV2 =
-        widget.prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2 &&
-        !_isSeerrFilterRow(row);
+    final isRowsV2 = _effectiveRowIsV2(row, widget.prefs);
 
     if (rowIndex == 0 && _rowTopOffsets.isNotEmpty) {
       if (_isMediaBarIncluded() && !_isBannerMode()) {
@@ -3503,9 +3499,7 @@ class _ContentRowsState extends State<_ContentRows>
       return _libraryRowExtent(rowHeight, metadataScale: metadataScale);
     } else {
       final isSeerrRowOverride = _isSeerrFilterRow(row);
-      final isRowsV2 =
-          prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2 &&
-          !isSeerrRowOverride;
+      final isRowsV2 = _effectiveRowIsV2(row, prefs);
       final rowImageType = isSeerrRowOverride
           ? ImageType.thumb
           : (isRowsV2 ? ImageType.poster : _homeRowImageTypeForRow(row, prefs));
@@ -3557,9 +3551,7 @@ class _ContentRowsState extends State<_ContentRows>
       final desktopScale = _desktopUiScaleFactor();
       final viewportHeight = MediaQuery.sizeOf(context).height;
       final safeTop = MediaQuery.paddingOf(context).top;
-      final isRowsV2 =
-          prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2 &&
-          !_isSeerrFilterRow(row);
+      final isRowsV2 = _effectiveRowIsV2(row, prefs);
 
       final navbarIsTop =
           prefs.get(UserPreferences.navbarPosition) == NavbarPosition.top;
@@ -4351,7 +4343,7 @@ class _ContentRowsState extends State<_ContentRows>
         height: rowHeight,
         itemExtent: squarePosterSide,
         itemSpacing: 12,
-        leadingPadding: _isHomeRowsStyleV2() ? _kHomeRowLabelInset : 0,
+        leadingPadding: _effectiveRowIsV2(row, widget.prefs) ? _kHomeRowLabelInset : 0,
         clipBehavior: cardExpansion ? Clip.none : Clip.hardEdge,
         padding: const EdgeInsets.fromLTRB(_kHomeRowLabelInset, 5, 20, 5),
         onIndexChanged: (_, _) {
@@ -4413,7 +4405,7 @@ class _ContentRowsState extends State<_ContentRows>
         height: rowHeight,
         itemExtent: squarePosterSide,
         itemSpacing: 12,
-        leadingPadding: _isHomeRowsStyleV2() ? _kHomeRowLabelInset : 0,
+        leadingPadding: _effectiveRowIsV2(row, widget.prefs) ? _kHomeRowLabelInset : 0,
         clipBehavior: cardExpansion ? Clip.none : Clip.hardEdge,
         padding: const EdgeInsets.fromLTRB(_kHomeRowLabelInset, 5, 20, 5),
         onIndexChanged: (_, item) {
@@ -4480,9 +4472,7 @@ class _ContentRowsState extends State<_ContentRows>
   }) {
     final suppressFocusGlow = ThemeRegistry.active.borders.focusGlow.isNotEmpty;
     final isSeerrRowOverride = _isSeerrFilterRow(row);
-    final isRowsV2 =
-        prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2 &&
-        !isSeerrRowOverride;
+    final isRowsV2 = _effectiveRowIsV2(row, prefs);
     final rowImageType = isSeerrRowOverride
         ? ImageType.thumb
         : (isRowsV2 ? ImageType.poster : _homeRowImageTypeForRow(row, prefs));
@@ -4990,7 +4980,12 @@ class _ContentRowsState extends State<_ContentRows>
     required double height,
     required Widget child,
   }) {
-    final isRowsV2 = _isHomeRowsStyleV2();
+    final headerRow = rowIndex < widget.viewModel.rows.length
+        ? widget.viewModel.rows[rowIndex]
+        : null;
+    final isRowsV2 = headerRow != null
+        ? _effectiveRowIsV2(headerRow, widget.prefs)
+        : _isHomeRowsStyleV2();
     final showHeaderControls =
         hasItems && PlatformDetection.useDesktopUi && !PlatformDetection.isTV;
     return RepaintBoundary(
@@ -5093,6 +5088,26 @@ class _ContentRowsState extends State<_ContentRows>
       row.id == 'seerr_series_genres' ||
       row.id == 'seerr_studios' ||
       row.id == 'seerr_networks';
+
+  /// A row's own Classic/Modern override, set from the home sections
+  /// settings screen. Null means "use the app-wide default style."
+  static HomeRowsStyle? _rowStyleOverride(HomeRow row, UserPreferences prefs) {
+    final config = prefs.homeSectionsConfig.firstWhereOrNull(
+      (c) => c.stableId == row.id,
+    );
+    return config?.styleOverride;
+  }
+
+  /// Whether this specific row should render as a Modern (v2) row, taking
+  /// into account (in priority order): rows that are always Classic
+  /// regardless of any setting, this row's own per-row override, and
+  /// finally the app-wide default style.
+  static bool _effectiveRowIsV2(HomeRow row, UserPreferences prefs) {
+    if (_isSeerrFilterRow(row)) return false;
+    final override = _rowStyleOverride(row, prefs);
+    if (override != null) return override == HomeRowsStyle.v2;
+    return prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2;
+  }
 
   static String? _seerrTmdbImageUrl(String? path, int width) {
     if (path == null || path.isEmpty) return null;

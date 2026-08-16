@@ -50,6 +50,10 @@ class HomeSectionConfig {
   final bool enabled;
   final int order;
 
+  /// Per-row override of the Classic/Modern row style. Null means "use the
+  /// app-wide default style" set in the main home rows preference.
+  final HomeRowsStyle? styleOverride;
+
   // pluginDynamic-only fields. Always null for builtin entries.
   final String? serverId;
   final String? pluginSection;
@@ -62,6 +66,7 @@ class HomeSectionConfig {
     this.type = HomeSectionType.none,
     this.enabled = true,
     this.order = 0,
+    this.styleOverride,
     this.serverId,
     this.pluginSection,
     this.pluginAdditionalData,
@@ -103,6 +108,9 @@ class HomeSectionConfig {
       type: HomeSectionType.fromSerialized(typeName),
       enabled: json['enabled'] as bool? ?? true,
       order: json['order'] as int? ?? 0,
+      styleOverride: _styleOverrideFromSerialized(
+        json['styleOverride'] as String?,
+      ),
       serverId: _normalizedServerId(json['serverId']?.toString(), pluginSource),
       pluginSection: json['pluginSection'] as String?,
       pluginAdditionalData: json['pluginAdditionalData'] as String?,
@@ -117,6 +125,9 @@ class HomeSectionConfig {
       'enabled': enabled,
       'order': order,
     };
+    if (styleOverride != null) {
+      json['styleOverride'] = styleOverride!.name;
+    }
     if (kind != HomeSectionKind.builtin) {
       json['kind'] = kind.serializedName;
       json['pluginSource'] = pluginSource.serializedName;
@@ -132,11 +143,24 @@ class HomeSectionConfig {
     return json;
   }
 
+  static HomeRowsStyle? _styleOverrideFromSerialized(String? value) {
+    if (value == null) return null;
+    for (final v in HomeRowsStyle.values) {
+      if (v.name == value) return v;
+    }
+    return null;
+  }
+
   HomeSectionConfig copyWith({
     HomeSectionKind? kind,
     HomeSectionType? type,
     bool? enabled,
     int? order,
+    // Wrapped in an Optional-like pattern isn't worth the ceremony here;
+    // pass useClearStyleOverride: true to explicitly reset to "use the
+    // app-wide default" rather than leaving the existing override in place.
+    HomeRowsStyle? styleOverride,
+    bool clearStyleOverride = false,
     String? serverId,
     String? pluginSection,
     String? pluginAdditionalData,
@@ -147,6 +171,9 @@ class HomeSectionConfig {
     type: type ?? this.type,
     enabled: enabled ?? this.enabled,
     order: order ?? this.order,
+    styleOverride: clearStyleOverride
+        ? null
+        : (styleOverride ?? this.styleOverride),
     serverId: serverId ?? this.serverId,
     pluginSection: pluginSection ?? this.pluginSection,
     pluginAdditionalData: pluginAdditionalData ?? this.pluginAdditionalData,
